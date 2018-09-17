@@ -4,6 +4,7 @@
 
 use Time::Local;
 use Fcntl ':flock';
+use Cwd;
 
 %ENV = ();
 $ENV{'PATH'} = "/bin:/sbin:/usr/bin:/usr/sbin";
@@ -19,9 +20,19 @@ foreach my $config (@ARGV)
 	my $post;
 	my $test;
 	my @keep;
+	my $dir;
 
 	# Parse the snapshot config.
 	open(F, "<$config") || die "Can't open $config: $!\n";
+
+	if (Cwd::abs_path($config) =~ m#^(.*)/[^/]*$#)
+	{
+		chdir($1) || die "chdir($1): $!\n";
+	}
+	else
+	{
+		die "Failed to parse '$config' for directory\n";
+	}
 
 	# Get a non-blocking lock. If we fail then exit as this
 	# almost certainly means another run of the same script
