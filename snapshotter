@@ -1,0 +1,226 @@
+#!/usr/bin/perl -Tw
+#
+# Manage BTRFS snapshots according to a schedule.
+
+use Time::Local;
+use Fcntl ':flock';
+
+%ENV = ();
+$ENV{'PATH'} = "/bin:/sbin:/usr/bin:/usr/sbin";
+
+die "Usage: $0 snapshot.conf [snapshot.conf ...]\n" unless (@ARGV >= 1);
+my (@config) = @ARGV;
+
+foreach my $config (@ARGV)
+{
+	my $src;
+	my $dest;
+	my $pre;
+	my $post;
+	my $test;
+	my @keep;
+
+	# Parse the snapshot config.
+	open(F, "<$config") || die "Can't open $config: $!\n";
+
+	# Get a non-blocking lock. If we fail then exit as this
+	# almost certainly means another run of the same script
+	# is going and we'll end up with duplicates for any other
+	# config in the list.
+	if (!flock(F, LOCK_EX|LOCK_NB))
+	{
+		print "$config: in use\n";
+		close(F);
+		next;
+	}
+	while (<F>)
+	{
+		s/#.*$//;
+		s/^\s*//;
+		s/\s*$//;
+		next if ($_ eq "");
+
+		my ($var, $values) = ($1, $2) if (/^(.*?)\s*=\s*(.*)/);
+		die "Invalid line in config: $_\n" unless defined($var);
+
+		if ($var eq "source")
+		{
+			die "Source specified twice\n" if (defined($src));
+			die "Source $values is not a directory\n" unless (-d $values);
+			$src = $values;
+		}
+		elsif ($var eq "dest")
+		{
+			die "Dest specified twice\n" if (defined($dest));
+			die "Dest $dest is not a directory\n" unless (-d $values);
+			$dest = $values;
+		}
+		elsif ($var eq "test")
+		{
+			die "test specified twice\n" if (defined($test));
+			$test = $values;
+		}
+		elsif ($var eq "pre-snapshot")
+		{
+			die "pre-snapshot specified twice\n" if (defined($pre));
+			$pre = $values;
+		}
+		elsif ($var eq "post-snapshot")
+		{
+			die "post-snapshot specified twice\n" if (defined($post));
+			$post = $values;
+		}
+		elsif ($var eq "keep")
+		{
+			my ($maxage, $keepresolution) = $values =~ /^(\S+)\s+(\S+)$/;
+			die "Keep incorrectly specified. Should be of the form: maxtime resolution\n"
+				unless (defined($keepresolution));
+			my $maxsecs = &decodetime($maxage, $_);
+			my $keepressecs = &decodetime($keepresolution, $_);
+			push(@keep, {
+				name => $values,
+				max => $maxsecs,
+				res => $keepressecs,
+				linenum => $.,
+				quanta => {},
+			});
+		}
+		else
+		{
+			die "Unknown setting at line $.: $_\n";
+		}
+	}
+	@keep = sort {$a->{max} <=> $b->{max}} @keep;
+
+	if (!defined($src))
+	{
+		print "Skipping $config - no source specified\n";
+		next;
+	}
+
+	# Dummy starting range to make the
+	# comparisons simpler later.
+	unshift(@keep, {
+		max => 0,
+		res => 0
+	});
+
+	for (my $i=1; $i<@keep; $i++)
+	{
+		my $ent = $keep[$i];
+		my $prev = $keep[$i-1];
+
+		die "Invalid/duplicate max age at line $ent->{line}\n"
+			unless ($ent->{max} > $prev->{max});
+
+		die "Invalid resolution specified at line $ent->{line}\n"
+			unless ($ent->{res} <= $ent->{max} - $prev->{max});
+
+		die "Resolution too small at line $ent->{line}\n"
+			unless ($ent->{res} > $prev->{res});
+
+		$ent->{min} = $prev->{max};
+
+	}
+
+	# Throw away the dummy range.
+	shift(@keep);
+
+	my $now = time;
+	my @t = localtime($now);
+
+	my @snapshots = ();
+	my @delete = ();
+	opendir(D, $dest) || die "opendir($dest): $!\n";
+	while (defined(my $ent = readdir(D)))
+	{
+		next unless ($ent =~ /^((\d\d\d\d)(\d\d)(\d\d)-(\d\d)(\d\d)(\d\d))$/);
+		my $age = $now - Time::Local::timelocal($7, $6, $5, $4, $3-1, $2-1900);
+		push(@snapshots, [ $1, $age ]);
+	}
+	foreach my $snapshot (sort {$b->[1] <=> $a->[1]} @snapshots)
+	{
+		my ($name, $age) = @{$snapshot};
+		my $found = 0;
+		foreach my $ent (@keep)
+		{
+			if ($age < $ent->{max})
+			{
+				$found = 1;
+				my $quantised_age = int(($age-$ent->{min}) / $ent->{res});
+				if (defined($ent->{quanta}->{$quantised_age}))
+				{
+					push(@delete, "$dest/$name");
+				}
+				else
+				{
+					$ent->{quanta}->{$quantised_age} = $age;
+				}
+				last;
+			}
+		}
+		die "Snapshot $name in $dest doesn't match any specified time range\n"
+			unless ($found);
+	}
+
+	if (defined($keep[0]->{quanta}->{0}))
+	{
+		my $age = $keep[0]->{quanta}->{0};
+		print "$src: Newest existing snapshot is new enough ($age seconds old)\n";
+	}
+	else
+	{
+		my $doit = 1;
+
+		# If there's a "test" option specified then run that
+		# first, and only do the snapshot etc if that returns
+		# success (exit 0). You could use this to e.g. ping a
+		# machine and only do the snapshot if the machine is up
+		# (presumably with an rsync in the "pre-snapshot" to
+		# copy stuff off that machine).
+		if (defined($test))
+		{
+			system "/bin/bash", "-c", $test;
+			$doit = ($? == 0) ? 1 : 0;
+		}
+		if ($doit)
+		{
+			system "/bin/bash", "-c", $pre if (defined($pre));
+
+			system "btrfs", "filesystem", "sync", $src;
+			die "An error occurred syncing filesystem\n" if ($?);
+
+			my $newsnap = sprintf("%04d%02d%02d-%02d%02d%02d",
+				$t[5]+1900, $t[4]+1, $t[3], $t[2], $t[1], $t[0]);
+			die "Snapshot name $newsnap already exists\n" if (-e "$dest/$newsnap");
+
+			system "btrfs", "subvol", "snapshot", $src, "$dest/$newsnap";
+			die "An error occurred taking snapshot\n" if ($?);
+
+			system "bash", "-c", $post if (defined($post));
+		}
+	}
+	foreach my $subvol (@delete)
+	{
+		system "btrfs", "subvol", "delete", $subvol;
+		die "Error deleting $subvol\n" if ($?);
+	}
+}
+
+
+sub decodetime
+{
+	my ($period, $line) = @_;
+	my %multiply = (
+		sec => 1,
+		min => 60,
+		hour => 3600,
+		day => 86400,
+		week => 604800,
+		year => 31536000
+	);
+
+	die "Invalid period '$period' specified in line $.\n" 
+		unless ($period =~ /^(\d+)(sec|min|hour|day|week|year)s?$/);
+	return $1*$multiply{$2};
+}
