@@ -7,7 +7,6 @@ use Getopt::Long;
 use Symbol;
 use Fcntl;
 use Cwd;
-use Data::Dumper;
 
 # Clear out the environment.
 %ENV = ();
