@@ -1,4 +1,4 @@
-#!/usr/bin/perl -Tw
+#!/usr/bin/perl -w
 #
 # Manage snapshots according to a schedule.
 
@@ -7,6 +7,11 @@ use Getopt::Long;
 use Symbol;
 use Fcntl;
 use Cwd;
+
+# Find the per-filesystem snapshotter module
+use FindBin;
+use lib "$FindBin::RealBin";
+use Snapshot;
 
 # Clear out the environment.
 %ENV = ();
@@ -47,7 +52,7 @@ foreach my $configfile (@ARGV)
 
     # If the source doesn't exist, it's an error
     # (unless okmissing is specified, in which case we skip).
-    if (!&checkexists($config->{source}))
+    if (!Snapshot::exists($config->{source}))
     {
         next if ($config->{okmissing});
 
@@ -55,7 +60,7 @@ foreach my $configfile (@ARGV)
     }
 
     # Get snapshot lists.
-    $config->{snaps} = &getsnaplist($config);
+    $config->{snaps} = Snapshot::list($config);
 
     push(@configs, $config);
 
@@ -93,7 +98,7 @@ foreach my $config (@configs)
             $creations++;
             if (!$test)
             {
-                if (&takesnap($config, $newsnap))
+                if (Snapshot::snapshot($config, $newsnap))
                 {
                     # Successful snapshot - add it to our list.
                     push(@{$config->{snaps}}, [ $newsnap, $now ]);
@@ -114,7 +119,7 @@ foreach my $config (@configs)
         $deletions++;
         if (!$test)
         {
-            if (!&deletesnap($config, $delete))
+            if (!Snapshot::delete($config, $delete))
             {
                 warn "$config->{name}: Error deleting snapshot $delete\n";
             }
@@ -302,7 +307,7 @@ sub filtersnaplist
                 $seen{$slot} = $ent;
             }
         }
-        $newsnap = &snapname($config) unless defined($seen{0});
+        $newsnap = Snapshot::newname($config) unless defined($seen{0});
     }
 
     # Finally work out what needs deleting after processing all rules.
@@ -331,66 +336,6 @@ sub runcommand
         system "/bin/bash", "-c", $cmd;
         return $? ? 1 : 0;
     }
-}
-
-sub checkexists
-{
-    my ($location) = @_;
-    return (-d $location);
-}
-
-sub snapname
-{
-    my ($config) = @_;
-    my @t = localtime($now);
-    return sprintf("%s/%04d%02d%02d-%02d%02d%02d",
-        defined($config->{dest}) ? $config->{dest} : $config->{source}, 
-            $t[5]+1900, $t[4]+1, $t[3], $t[2], $t[1], $t[0]);
-}
-
-sub takesnap
-{
-    my ($config, $name) = @_;
-
-    system "btrfs", "filesystem", "sync", $config->{source};
-    return 0 if ($?);
-
-    system "btrfs", "subvol", "snapshot", $config->{source}, $name;
-    return 0 if ($?);
-
-    return 1;
-}
-
-sub deletesnap
-{
-    my ($config, $name) = @_;
-
-    system "btrfs", "subvol", "delete", $config->{dest}."/".$name;
-
-    return !$?;
-}
-
-# Get a list of existing snapshots for this config.
-sub getsnaplist
-{
-    my ($config) = @_;
-    my @snaps = (); 
-
-    my $dest = (defined($config->{dest}) ? $config->{dest} : $config->{source});
-    opendir(D, $dest) || die "Failed to open $dest: $!\n";
-    foreach my $sub (readdir(D))
-    {
-        if (($sub =~ /^((\d\d\d\d)(\d\d)(\d\d)-(\d\d)(\d\d)(\d\d))$/) && (-d "$dest/$sub"))
-        {
-            my $stamp = Time::Local::timelocal($7, $6, $5, $4, $3-1, $2-1900);
-            push(@snaps, [ $1, $stamp ]);
-        }
-    }
-
-    # Sort by time.
-    @snaps = sort {$a->[1] <=> $b->[1]} @snaps;
-
-    return \@snaps;
 }
 
 
