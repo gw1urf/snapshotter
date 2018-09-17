@@ -22,7 +22,7 @@ my $lockfile = "/var/lock/snapshotter.lock";
 
 my @t = localtime($now);
 printf "--- Running at %04d-%02d-%02d %02d:%02d:%02d ---\n",
-	1900+$t[5], 1+$t[4], $t[3], $t[2], $t[1], $t[0];
+    1900+$t[5], 1+$t[4], $t[3], $t[2], $t[1], $t[0];
 
 my $creations = 0;
 my $deletions = 0;
@@ -40,8 +40,8 @@ $cwd = $1 if ($cwd =~ /^(.*)$/); # Untaint it.
 
 foreach my $configfile (@ARGV)
 {
-	# Parse the config.
-	my $config = &readconfig($configfile);
+    # Parse the config.
+    my $config = &readconfig($configfile);
 
     chdir($config->{dirname}) || die "chdir: $!\n";
 
@@ -54,10 +54,10 @@ foreach my $configfile (@ARGV)
         die "Config source '$config->{source}' not found!\n";
     }
 
-	# Get snapshot lists.
-	$config->{snaps} = &getsnaplist($config);
+    # Get snapshot lists.
+    $config->{snaps} = &getsnaplist($config);
 
-	push(@configs, $config);
+    push(@configs, $config);
 
     chdir($cwd) || die "chdir: $!\n";
 }
@@ -69,11 +69,11 @@ flock(LOCK, Fcntl::LOCK_EX|Fcntl::LOCK_NB) || die "Another copy of $0 is running
 # Handle each config file.
 foreach my $config (@configs)
 {
-	# Do we need to make a snapshot?
-	my ($newsnap, $todelete) = &filtersnaplist($config);
+    # Do we need to make a snapshot?
+    my ($newsnap, $todelete) = &filtersnaplist($config);
 
-	if (defined($newsnap))
-	{
+    if (defined($newsnap))
+    {
         my $doit = 1;
 
         # If there's a "test" option in the config file, run
@@ -106,20 +106,20 @@ foreach my $config (@configs)
             &runcommand($config->{post_snapshot})
                 if (defined($config->{post_snapshot}));
         }
-	}
+    }
 
-	foreach my $delete (@{$todelete})
-	{
-		print "$config->{name}: Delete snapshot $delete\n";
-		$deletions++;
-		if (!$test)
-		{
+    foreach my $delete (@{$todelete})
+    {
+        print "$config->{name}: Delete snapshot $delete\n";
+        $deletions++;
+        if (!$test)
+        {
             if (!&deletesnap($config, $delete))
             {
                 warn "$config->{name}: Error deleting snapshot $delete\n";
             }
-		}
-	}
+        }
+    }
 }
 
 # DO NOT close the lockfile before deleting - this would 
@@ -129,193 +129,193 @@ unlink($lockfile);
 close(LOCK);
 
 printf "--- Completed %d creation%s and %d deletion%s in %ds ---\n", 
-	$creations, $creations == 1 ? "" : "s",
-	$deletions, $deletions == 1 ? "" : "s",
-	time-$now;
+    $creations, $creations == 1 ? "" : "s",
+    $deletions, $deletions == 1 ? "" : "s",
+    time-$now;
 
 sub readconfig
 {
-	my ($file) = @_;
+    my ($file) = @_;
     my $conffd = gensym;
 
-	# Empty hash to fill out.
-	my $config = {
-		name => $file,
-		snapshot => [],
-		okmissing => 0,
-	};
+    # Empty hash to fill out.
+    my $config = {
+        name => $file,
+        snapshot => [],
+        okmissing => 0,
+    };
 
     $file = Cwd::abs_path($file);
-	open($conffd, "<$file") || die "Can't read $file: $!\n";
+    open($conffd, "<$file") || die "Can't read $file: $!\n";
 
-	if ($file =~ m#^(.*)/([^/]*)$#)
-	{
+    if ($file =~ m#^(.*)/([^/]*)$#)
+    {
         $config->{dirname} = $1;
         $config->{basename} = $2;
-	}
-	else
-	{
-		die "Failed to parse '$file' for directory\n";
-	}
+    }
+    else
+    {
+        die "Failed to parse '$file' for directory\n";
+    }
 
-	# Get a non-blocking lock. If we fail then exit as this
-	# almost certainly means another run of the same script
-	# is going and we'll end up with duplicates for any other
-	# config in the list.
-	if (!flock($conffd, Fcntl::LOCK_EX|Fcntl::LOCK_NB))
-	{
-		print "$config: in use\n";
-		close($conffd);
-		next;
-	}
+    # Get a non-blocking lock. If we fail then exit as this
+    # almost certainly means another run of the same script
+    # is going and we'll end up with duplicates for any other
+    # config in the list.
+    if (!flock($conffd, Fcntl::LOCK_EX|Fcntl::LOCK_NB))
+    {
+        print "$config: in use\n";
+        close($conffd);
+        next;
+    }
 
-	while (<$conffd>)
-	{
-		s/#.*$//;
-		s/^\s*//;
-		s/\s*$//;
-		next if ($_ eq "");
+    while (<$conffd>)
+    {
+        s/#.*$//;
+        s/^\s*//;
+        s/\s*$//;
+        next if ($_ eq "");
 
-		# Parse out "tag = values" lines.
-		my ($var, $values) = ($1, $2) if (/^(.*?)\s*=\s*(.*)\s*$/);
-		die "$file: Unparseable at line $..\n" unless defined($var);
+        # Parse out "tag = values" lines.
+        my ($var, $values) = ($1, $2) if (/^(.*?)\s*=\s*(.*)\s*$/);
+        die "$file: Unparseable at line $..\n" unless defined($var);
 
-		# Check our tags and do the necessary.
-		if ($var eq "source")
-		{
-			die "$file: source specified twice at line $..\n" 
-				if (defined($config->{source}));
-			$config->{source} = $values;
-		}
-		elsif ($var eq "dest")
-		{
-			die "Dest specified twice\n" if (defined($config->{dest}));
-			$config->{dest} = $values;
-		}
-		elsif ($var eq "test")
-		{
-			die "test specified twice\n" if (defined($config->{test}));
-			$config->{test} = $values;
-		}
-		elsif ($var eq "pre-snapshot")
-		{
-			die "pre-snapshot specified twice\n" 
+        # Check our tags and do the necessary.
+        if ($var eq "source")
+        {
+            die "$file: source specified twice at line $..\n" 
+                if (defined($config->{source}));
+            $config->{source} = $values;
+        }
+        elsif ($var eq "dest")
+        {
+            die "Dest specified twice\n" if (defined($config->{dest}));
+            $config->{dest} = $values;
+        }
+        elsif ($var eq "test")
+        {
+            die "test specified twice\n" if (defined($config->{test}));
+            $config->{test} = $values;
+        }
+        elsif ($var eq "pre-snapshot")
+        {
+            die "pre-snapshot specified twice\n" 
                 if (defined($config->{pre_snapshot}));
-			$config->{pre_snapshot} = $values;
-		}
-		elsif ($var eq "post-snapshot")
-		{
-			die "post-snapshot specified twice\n" 
+            $config->{pre_snapshot} = $values;
+        }
+        elsif ($var eq "post-snapshot")
+        {
+            die "post-snapshot specified twice\n" 
                 if (defined($config->{post_snapshot}));
-			$config->{post_snapshot} = $values;
-		}
-		elsif (($var eq "snapshot") || ($var eq "keep"))
-		{
-			my ($every, $maxage, $bias, $noreplicate) = (undef, undef, 0, 0);
-			my $origvalues = $values;
-			$every = &decodetime($1) if ($values =~ s/^\s*every\s+(\S+)//);
-			$maxage = &decodetime($1) if ($values =~ s/^\s*for\s+(\S+)//);
-			$bias = &decodetime($1) if ($values =~ s/^\s*bias\s+(\S+)//);
+            $config->{post_snapshot} = $values;
+        }
+        elsif (($var eq "snapshot") || ($var eq "keep"))
+        {
+            my ($every, $maxage, $bias, $noreplicate) = (undef, undef, 0, 0);
+            my $origvalues = $values;
+            $every = &decodetime($1) if ($values =~ s/^\s*every\s+(\S+)//);
+            $maxage = &decodetime($1) if ($values =~ s/^\s*for\s+(\S+)//);
+            $bias = &decodetime($1) if ($values =~ s/^\s*bias\s+(\S+)//);
 
-			die "$file: snapshot rule incorrectly specified at line $. (unparsed = '$values').\n"
-				unless (defined($every) && defined($maxage) && ($values eq ""));
+            die "$file: snapshot rule incorrectly specified at line $. (unparsed = '$values').\n"
+                unless (defined($every) && defined($maxage) && ($values eq ""));
 
-			die "$file: snapshot rule at $. specifies \"every\" greater than \"for\"\n"
-				if ($every > $maxage);
+            die "$file: snapshot rule at $. specifies \"every\" greater than \"for\"\n"
+                if ($every > $maxage);
 
-			die "$file: snapshot rule at $. specifies \"bias\" greater than \"every\"\n"
-				if ($bias > $every);
+            die "$file: snapshot rule at $. specifies \"bias\" greater than \"every\"\n"
+                if ($bias > $every);
 
-			push(@{$config->{snapshot}}, {
-				spec => $origvalues,
-				maxslot => int($maxage/$every),
-				bias => $bias,
-				res => $every,
-			});
-		}
-		elsif ($var eq "okmissing")
-		{
-			die "$file: okmissing must be true or false\n"
-				unless ($values =~ /^(true|false)$/);
-			$config->{okmissing} = ($values eq "true");
-		}
-		else
-		{
-			die "$file: Unknown setting at line $.: $_\n";
-		}
-	}
+            push(@{$config->{snapshot}}, {
+                spec => $origvalues,
+                maxslot => int($maxage/$every),
+                bias => $bias,
+                res => $every,
+            });
+        }
+        elsif ($var eq "okmissing")
+        {
+            die "$file: okmissing must be true or false\n"
+                unless ($values =~ /^(true|false)$/);
+            $config->{okmissing} = ($values eq "true");
+        }
+        else
+        {
+            die "$file: Unknown setting at line $.: $_\n";
+        }
+    }
 
     die "$file: Contains no source directory\n"
         unless (defined($config->{source}));
 
-	die "$file: Contains no snapshot rules\n"
-		if (@{$config->{snapshot}} == 0);
+    die "$file: Contains no snapshot rules\n"
+        if (@{$config->{snapshot}} == 0);
 
-	# Sort them into increasing resolution order.
-	@{$config->{snapshot}} = sort { $a->{res} <=> $b->{res} } @{$config->{snapshot}};
+    # Sort them into increasing resolution order.
+    @{$config->{snapshot}} = sort { $a->{res} <=> $b->{res} } @{$config->{snapshot}};
 
-	return $config;
+    return $config;
 }
 
 # Decode a "friendly" time into seconds.
 sub decodetime
 {
-	my ($period, $line) = @_;
-	my %multiply = (
-		sec => 1,
-		min => 60,
-		hour => 3600,
-		day => 86400,
-		week => 604800,
-		year => 31536000
-	);
+    my ($period, $line) = @_;
+    my %multiply = (
+        sec => 1,
+        min => 60,
+        hour => 3600,
+        day => 86400,
+        week => 604800,
+        year => 31536000
+    );
 
-	die "Invalid period '$period' specified in line $.\n" 
-		unless ($period =~ /^(\d+)(sec|min|hour|day|week|year)s?$/);
-	return $1*$multiply{$2};
+    die "Invalid period '$period' specified in line $.\n" 
+        unless ($period =~ /^(\d+)(sec|min|hour|day|week|year)s?$/);
+    return $1*$multiply{$2};
 }
 
 sub filtersnaplist
 {
     my ($config) = @_;
-	
-	my @delete = ();
-	my %keep = ();
-	my $newsnap = undef;
+    
+    my @delete = ();
+    my %keep = ();
+    my $newsnap = undef;
 
-	foreach my $rule (@{$config->{snapshot}})
-	{
-		my %seen = ();
-		my $nowslotstart = $now - (($now - $rule->{bias}) % $rule->{res});
+    foreach my $rule (@{$config->{snapshot}})
+    {
+        my %seen = ();
+        my $nowslotstart = $now - (($now - $rule->{bias}) % $rule->{res});
 
-		foreach my $snap (@{$config->{snaps}})
-		{
-			my ($ent, $stamp) = @{$snap};
+        foreach my $snap (@{$config->{snaps}})
+        {
+            my ($ent, $stamp) = @{$snap};
 
-			my $stampslotstart = $stamp - (($stamp -$rule->{bias}) % $rule->{res});
+            my $stampslotstart = $stamp - (($stamp -$rule->{bias}) % $rule->{res});
 
-			my $slot = int(($nowslotstart-$stampslotstart)/$rule->{res});
-			$slot = 0 if ($slot < 0);
-			if (!defined($seen{$slot}) && ($slot <= $rule->{maxslot}))
-			{
-				$keep{$ent} = 1;
-				$seen{$slot} = $ent;
-			}
-		}
-		$newsnap = &snapname($config) unless defined($seen{0});
-	}
+            my $slot = int(($nowslotstart-$stampslotstart)/$rule->{res});
+            $slot = 0 if ($slot < 0);
+            if (!defined($seen{$slot}) && ($slot <= $rule->{maxslot}))
+            {
+                $keep{$ent} = 1;
+                $seen{$slot} = $ent;
+            }
+        }
+        $newsnap = &snapname($config) unless defined($seen{0});
+    }
 
-	# Finally work out what needs deleting after processing all rules.
-	my @keep = ();
-	foreach my $snap (@{$config->{snaps}})
-	{
-		if (!defined($keep{$snap->[0]}))
-		{
-			push(@delete, $snap->[0]);
-		}
-	}
+    # Finally work out what needs deleting after processing all rules.
+    my @keep = ();
+    foreach my $snap (@{$config->{snaps}})
+    {
+        if (!defined($keep{$snap->[0]}))
+        {
+            push(@delete, $snap->[0]);
+        }
+    }
 
-	return ($newsnap, \@delete);
+    return ($newsnap, \@delete);
 }
 
 sub runcommand
@@ -373,7 +373,7 @@ sub deletesnap
 # Get a list of existing snapshots for this config.
 sub getsnaplist
 {
-	my ($config) = @_;
+    my ($config) = @_;
     my @snaps = (); 
 
     my $dest = (defined($config->{dest}) ? $config->{dest} : $config->{source});
@@ -387,10 +387,10 @@ sub getsnaplist
         }
     }
 
-	# Sort by time.
-	@snaps = sort {$a->[1] <=> $b->[1]} @snaps;
+    # Sort by time.
+    @snaps = sort {$a->[1] <=> $b->[1]} @snaps;
 
-	return \@snaps;
+    return \@snaps;
 }
 
 
