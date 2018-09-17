@@ -245,6 +245,9 @@ sub readconfig
 		}
 	}
 
+    die "$file: Contains no source directory\n"
+        unless (defined($config->{source}));
+
 	die "$file: Contains no snapshot rules\n"
 		if (@{$config->{snapshot}} == 0);
 
@@ -341,7 +344,8 @@ sub snapname
     my ($config) = @_;
     my @t = localtime($now);
     return sprintf("%s/%04d%02d%02d-%02d%02d%02d",
-        $config->{dest}, $t[5]+1900, $t[4]+1, $t[3], $t[2], $t[1], $t[0]);
+        defined($config->{dest}) ? $config->{dest} : $config->{source}, 
+            $t[5]+1900, $t[4]+1, $t[3], $t[2], $t[1], $t[0]);
 }
 
 sub takesnap
@@ -371,10 +375,12 @@ sub getsnaplist
 {
 	my ($config) = @_;
     my @snaps = (); 
-    opendir(D, $config->{dest}) || die "Failed to open $config->{dest}: $!\n";
+
+    my $dest = (defined($config->{dest}) ? $config->{dest} : $config->{source});
+    opendir(D, $dest) || die "Failed to open $dest: $!\n";
     foreach my $sub (readdir(D))
     {
-        if (($sub =~ /^((\d\d\d\d)(\d\d)(\d\d)-(\d\d)(\d\d)(\d\d))$/) && (-d "$config->{dest}/$sub"))
+        if (($sub =~ /^((\d\d\d\d)(\d\d)(\d\d)-(\d\d)(\d\d)(\d\d))$/) && (-d "$dest/$sub"))
         {
             my $stamp = Time::Local::timelocal($7, $6, $5, $4, $3-1, $2-1900);
             push(@snaps, [ $1, $stamp ]);
@@ -425,8 +431,8 @@ of this location will be created. This directive is compulsory.
 
 =item B<dest = >location
 
-This specifies where the snapshots should be created. This
-directive is compulsory.
+This optional directive specifies where the snapshots should be 
+created.
 
 =item B<test = >command
 
