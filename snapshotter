@@ -76,6 +76,7 @@ foreach my $config (@configs)
 {
     # Do we need to make a snapshot?
     my ($newsnap, $todelete) = &filtersnaplist($config);
+    chdir($config->{dirname}) || die "chdir: $!\n";
 
     if (defined($newsnap))
     {
