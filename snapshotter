@@ -98,10 +98,10 @@ foreach my $config (@configs)
         }
         if ($doit)
         {
+            print "$config->{name}: Take snapshot $newsnap\n";
             &runcommand($config->{pre_snapshot}) 
                 if (defined($config->{pre_snapshot}));
 
-            print "$config->{name}: Take snapshot $newsnap\n";
             $creations++;
             if (!$test)
             {
