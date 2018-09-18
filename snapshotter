@@ -8,10 +8,16 @@ use Symbol;
 use Fcntl;
 use Cwd;
 
-# Find the per-filesystem snapshotter module
+# Find the per-filesystem snapshotter module based
+# on the script name.
 use FindBin;
-use lib "$FindBin::RealBin";
-use Snapshot;
+
+# Get our fs-specific module.
+die "Can't parse filesystem variant name out of '$FindBin::Script'\n"
+    unless ($FindBin::Script =~ /^([a-z0-9]+)-snapshotter$/);
+
+my $variant = $1;
+require "$FindBin::RealBin/Snapshot/$variant.pm";
 
 # Clear out the environment.
 %ENV = ();
