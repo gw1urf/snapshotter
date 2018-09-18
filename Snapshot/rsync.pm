@@ -1,10 +1,14 @@
-# Variant for btrfs
+# Variant for rsync with link-dest
 
 package Snapshot;
 
+use File::Path;
+
 sub checkconfig
 {
-    return;
+    my ($config) = @_;
+    die "Rsync config must have a \"dest = \" specified\n"
+        unless (defined($config->{dest}));
 }
 
 sub exists
@@ -30,11 +34,16 @@ sub snapshot
 {
     my ($config, $name) = @_;
 
-    system "btrfs", "filesystem", "sync", $config->{source};
+    system "rsync", "-av", "--delete", "--link-dest=$config->{dest}/current", $config->{source}."/", $name."/";
     return 0 if ($?);
 
-    system "btrfs", "subvol", "snapshot", $config->{source}, $name;
-    return 0 if ($?);
+    unlink("$config->{dest}/current");
+
+    if (!symlink($name, "$config->{dest}/current"))
+    {
+        warn "symlink($name, $config->{dest}/current): $!\n";
+        return 0;
+    }
 
     return 1;
 }
@@ -43,7 +52,7 @@ sub delete
 {
     my ($config, $name) = @_;
 
-    system "btrfs", "subvol", "delete", $config->{dest}."/".$name;
+    system "rm", "-rf", $name;
 
     return !$?;
 }

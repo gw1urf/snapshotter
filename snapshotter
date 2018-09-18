@@ -55,6 +55,7 @@ foreach my $configfile (@ARGV)
     my $config = &readconfig($configfile);
 
     chdir($config->{dirname}) || die "chdir: $!\n";
+    Snapshot::checkconfig($config);
 
     # If the source doesn't exist, it's an error
     # (unless okmissing is specified, in which case we skip).

@@ -2,6 +2,11 @@
 
 package Snapshot;
 
+sub checkconfig
+{
+    return;
+}
+
 sub exists
 {
     my ($location) = @_;
