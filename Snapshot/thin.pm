@@ -115,7 +115,7 @@ sub list
     {
         s/^\s*//;
         my ($devname) = (split(":", $_))[0];
-        next unless ($devname =~ m#/dev/$config->{vg}/$config->{lv}-((\d\d\d\d)(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)Z)#);
+        next unless ($devname =~ m#/dev/$config->{vg}/($config->{lv}-(\d\d\d\d)(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)Z)#);
         my $stamp = Time::Local::timegm($7, $6, $5, $4, $3-1, $2-1900);
         push(@snaps, [$1, $stamp]);
     }

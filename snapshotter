@@ -202,23 +202,23 @@ sub readconfig
         }
         elsif ($var eq "dest")
         {
-            die "Dest specified twice\n" if (defined($config->{dest}));
+            die "Dest specified twice at line $..\n" if (defined($config->{dest}));
             $config->{dest} = $values;
         }
         elsif ($var eq "test")
         {
-            die "test specified twice\n" if (defined($config->{test}));
+            die "test specified twice at line $..\n" if (defined($config->{test}));
             $config->{test} = $values;
         }
         elsif ($var eq "pre-snapshot")
         {
-            die "pre-snapshot specified twice\n" 
+            die "pre-snapshot specified twice at line $..\n" 
                 if (defined($config->{pre_snapshot}));
             $config->{pre_snapshot} = $values;
         }
         elsif ($var eq "post-snapshot")
         {
-            die "post-snapshot specified twice\n" 
+            die "post-snapshot specified twice at line $..\n" 
                 if (defined($config->{post_snapshot}));
             $config->{post_snapshot} = $values;
         }
@@ -385,7 +385,9 @@ of this location will be created. This directive is compulsory.
 =item B<dest = >location
 
 This optional directive specifies where the snapshots should be 
-created.
+created. Some snapshotting modules (e.g. zfs) don't use this 
+directive because their destination name is dependent on the 
+source name.
 
 =item B<test = >command
 
