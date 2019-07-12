@@ -12,16 +12,13 @@ sub checkconfig
         unless ($config->{source} =~ m#^/dev/([^/]+)/([^/]+)$#);
     $config->{vg} = $1;
     $config->{lv} = $2;
-
-	# Come up with a name for a temporary directory.
-	# Used for mounting so we can do fstrim later.
-    $config->{"tmpmnt"} = "/tmp/snapshotter.$$";
 }
 
 sub exists
 {
     my ($location) = @_;
     my $pid = fork;
+
     die "fork: $!\n" unless defined($pid);
     if ($pid == 0)
     {
@@ -50,41 +47,17 @@ sub snapshot
 {
     my ($config, $name) = @_;
 
-    system "lvcreate", "-s", "-n", $name, $config->{source};
+    &system_no_stderr("lvcreate", "-s", "-n", $name, $config->{source});
     return 0 if ($?);
 
     # By default, snapshots are skipped for auto-activation. I think we want them
     # to be activated for ease of use.
-    system "lvchange", "-k", "n", $config->{vg}."/".$name;
+    &system_no_stderr("lvchange", "-k", "n", $config->{vg}."/".$name);
     return 0 if ($?);
 
     # Now activate and trim it.
-    system "lvchange", "-ay", $config->{vg}."/".$name;
+    &system_no_stderr("lvchange", "-ay", $config->{vg}."/".$name);
     return 0 if ($?);
-
-    unless (mkdir($config->{tmpmnt}, 0700))
-    {
-       warn "Failed to create temp directory $config->{tmpmnt}: $!\n";
-       return 0;
-    }
-
-    print "Trimming the filesystem to save snapshot space\n";
-
-    system "mount", "-r", "/dev/$config->{vg}/$name", $config->{tmpmnt};
-    return 0 if ($?);
-
-    system "fstrim", $config->{tmpmnt};
-    # If fstrim fails, it's not enough of a problem that
-    # it should abort the backup.
-
-    system "umount", $config->{tmpmnt};
-    return 0 if ($?);
-
-    unless (rmdir($config->{tmpmnt}))
-    {
-       warn "Failed to remove temp directory $config->{tmpmnt}: $!\n";
-       return 0;
-    }
 
     return 1;
 }
@@ -108,6 +81,9 @@ sub list
     die "fork: $!\n" unless defined($pid);
     if ($pid == 0)
     {
+	# lvdisplay insists on scanning all DRBDs and warning if
+	# not primary. Suppress stderr.
+	close(STDERR);
         exec "lvdisplay", "-c";
         die "exec: $!\n";
     }
@@ -125,6 +101,22 @@ sub list
     @snaps = sort {$a->[1] <=> $b->[1]} @snaps;
 
     return \@snaps;
+}
+
+sub system_no_stderr
+{
+	my @cmd = @_;
+
+	my $pid = fork;
+	die "fork: $!\n" unless defined($pid);
+	if ($pid == 0)
+	{
+		close(STDERR);
+		exec @cmd;
+		die "exec: $!\n";
+	}
+	waitpid($pid, 0);
+	return $?;
 }
 
 1;
