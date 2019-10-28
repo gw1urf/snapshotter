@@ -85,7 +85,7 @@ foreach my $config (@configs)
     my ($newsnap, $todelete) = &filtersnaplist($config);
     chdir($config->{dirname}) || die "chdir: $!\n";
 
-    if (defined($newsnap))
+    if (defined($newsnap) && !$config->{pruneonly})
     {
         my $doit = 1;
 
@@ -156,6 +156,7 @@ sub readconfig
         name => $file,
         snapshot => [],
         okmissing => 0,
+        pruneonly => 0,
     };
 
     $file = Cwd::abs_path($file);
@@ -221,6 +222,12 @@ sub readconfig
             die "post-snapshot specified twice at line $..\n" 
                 if (defined($config->{post_snapshot}));
             $config->{post_snapshot} = $values;
+        }
+        elsif ($var eq "pruneonly")
+        {
+            die "$file: pruneonly must be either 'true' or 'false' at line $..\n"
+                unless ($values =~ /^(true|false)$/);
+            $config->{pruneonly} = 1 if ($values eq "true");
         }
         elsif (($var eq "snapshot") || ($var eq "keep"))
         {
@@ -407,6 +414,13 @@ host before taking the snapshot.
 
 If B<post-snapshot> is specified it is run after a snapshot is
 taken.
+
+=item B<pruneonly = true|false>
+
+If you specify B<pruneonly = true> then the no new snapshots will 
+taken for this location. This is useful for the case where you've 
+stopped using the location and just want the retention policy to 
+apply to the snapshots that are already present.
 
 =item B<snapshot = every> timeperiod B<for> timeperiod [B<bias> timeperiod]
 
