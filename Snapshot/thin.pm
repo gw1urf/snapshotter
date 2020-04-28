@@ -6,8 +6,8 @@ sub checkconfig
 {
     my ($config) = @_;
 
-	# Check the source is specified and split it up
-	# for later use.
+    # Check the source is specified and split it up
+    # for later use.
     die "\"source = \" should be of the form /dev/vgname/lvname\n"
         unless ($config->{source} =~ m#^/dev/([^/]+)/([^/]+)$#);
     $config->{vg} = $1;
@@ -66,7 +66,7 @@ sub delete
 {
     my ($config, $name) = @_;
 
-    system "lvremove", "-f", $config->{vg}."/".$name;
+    &system_no_stderr("lvremove", "-f", $config->{vg}."/".$name);
 
     return !$?;
 }
@@ -81,9 +81,9 @@ sub list
     die "fork: $!\n" unless defined($pid);
     if ($pid == 0)
     {
-	# lvdisplay insists on scanning all DRBDs and warning if
-	# not primary. Suppress stderr.
-	close(STDERR);
+        # lvdisplay insists on scanning all DRBDs and warning if
+        # not primary. Suppress stderr.
+        close(STDERR);
         exec "lvdisplay", "-c";
         die "exec: $!\n";
     }
@@ -105,18 +105,18 @@ sub list
 
 sub system_no_stderr
 {
-	my @cmd = @_;
+    my @cmd = @_;
 
-	my $pid = fork;
-	die "fork: $!\n" unless defined($pid);
-	if ($pid == 0)
-	{
-		close(STDERR);
-		exec @cmd;
-		die "exec: $!\n";
-	}
-	waitpid($pid, 0);
-	return $?;
+    my $pid = fork;
+    die "fork: $!\n" unless defined($pid);
+    if ($pid == 0)
+    {
+        close(STDERR);
+        exec @cmd;
+        die "exec: $!\n";
+    }
+    waitpid($pid, 0);
+    return $?;
 }
 
 1;
