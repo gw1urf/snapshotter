@@ -11,10 +11,11 @@ use Cwd;
 # Find the per-filesystem snapshotter module based
 # on the script name.
 use FindBin;
+my $me = $FindBin::Script;
 
 # Get our fs-specific module.
 die "Can't parse filesystem variant name out of '$FindBin::Script'\n"
-    unless ($FindBin::Script =~ /^([a-z0-9]+)-snapshotter$/);
+    unless ($me =~ /^([a-z0-9]+)-snapshotter$/);
 
 my $variant = $1;
 require "$FindBin::RealBin/Snapshot/$variant.pm";
@@ -25,15 +26,14 @@ $ENV{'PATH'} = "/bin:/sbin:/usr/bin:/usr/sbin";
 
 my $test = 0;
 GetOptions("test" => \$test);
-die "Usage: $0 [-test] snapshot.conf [snapshot.conf ...]\n" unless (@ARGV >= 1);
+die "Usage: $me [-test] snapshot.conf [snapshot.conf ...]\n" unless (@ARGV >= 1);
 my (@config) = @ARGV;
 
 my $now = time;
 my $lockfile = "/var/lock/snapshotter.lock";
 
 my @t = localtime($now);
-printf "--- Running at %04d-%02d-%02d %02d:%02d:%02d ---\n",
-    1900+$t[5], 1+$t[4], $t[3], $t[2], $t[1], $t[0];
+&info($me, "Starting run");
 
 my $creations = 0;
 my $deletions = 0;
@@ -51,10 +51,12 @@ $cwd = $1 if ($cwd =~ /^(.*)$/); # Untaint it.
 
 foreach my $configfile (@ARGV)
 {
+    &info($me, "Reading $configfile");
+
     # Parse the config.
     my $config = &readconfig($configfile);
 
-    chdir($config->{dirname}) || die "chdir: $!\n";
+    chdir($config->{dirname}) || &error($configfile, "chdir(%s): %s", $config->{dirname}, $!);
     Snapshot::checkconfig($config);
 
     # If the source doesn't exist, it's an error
@@ -63,7 +65,7 @@ foreach my $configfile (@ARGV)
     {
         next if ($config->{okmissing});
 
-        die "Config source '$config->{source}' not found!\n";
+        &error($configfile, "Config source '%s' not found!", $config->{source});
     }
 
     # Get snapshot lists.
@@ -71,19 +73,19 @@ foreach my $configfile (@ARGV)
 
     push(@configs, $config);
 
-    chdir($cwd) || die "chdir: $!\n";
+    chdir($cwd) || &error($configfile, "chdir(%s): %s", $cwd, $!);
 }
 
 # Take a non-blocking lock. If we don't get it then exit.
-sysopen(LOCK, $lockfile, Fcntl::O_RDWR|Fcntl::O_CREAT) || die "Can't open lock file $lockfile: $!\n";
-flock(LOCK, Fcntl::LOCK_EX|Fcntl::LOCK_NB) || die "Another copy of $0 is running\n";
+sysopen(LOCK, $lockfile, Fcntl::O_RDWR|Fcntl::O_CREAT) || &error($me, "Can't open lock file %s: %s", $lockfile, $!);
+flock(LOCK, Fcntl::LOCK_EX|Fcntl::LOCK_NB) || &error($me, "Another copy is running");
 
 # Handle each config file.
 foreach my $config (@configs)
 {
     # Do we need to make a snapshot?
     my ($newsnap, $todelete) = &filtersnaplist($config);
-    chdir($config->{dirname}) || die "chdir: $!\n";
+    chdir($config->{dirname}) || &error($config->{name}, "chdir(%s): %s", $config->{dirname}, $!);
 
     if (defined($newsnap) && !$config->{pruneonly})
     {
@@ -94,42 +96,42 @@ foreach my $config (@configs)
         # that succeeds.
         if (defined($config->{test}))
         {
-            my $ret = &runcommand($config->{test});
+            my $ret = &logelapsed($config->{name}, "Command", sub {&runcommand($config->{name}, $config->{test})});
             $doit = ($ret == 0) ? 1 : 0;
         }
         if ($doit)
         {
-            print "$config->{name}: Take snapshot $newsnap\n";
-            &runcommand($config->{pre_snapshot}) 
+            &info($config->{name}, "Take snapshot %s", $newsnap);
+            &logelapsed($config->{name}, "Command", sub {&runcommand($config->{name}, $config->{pre_snapshot})}) 
                 if (defined($config->{pre_snapshot}));
 
             $creations++;
             if (!$test)
             {
-                if (Snapshot::snapshot($config, $newsnap))
+                if (&logelapsed($config->{name}, "Taking snapshot", sub {Snapshot::snapshot($config, $newsnap)}))
                 {
                     # Successful snapshot - add it to our list.
                     push(@{$config->{snaps}}, [ $newsnap, $now ]);
                 }
                 else
                 {
-                    warn "$config->{name}: Failed to create snapshot $newsnap\n";
+                    &warning($config->{name}, "Failed to create snapshot %s", $newsnap);
                 }
             }
-            &runcommand($config->{post_snapshot})
+            &logelapsed($config->{name}, "Command", sub{&runcommand($config->{name}, $config->{post_snapshot})})
                 if (defined($config->{post_snapshot}));
         }
     }
 
     foreach my $delete (@{$todelete})
     {
-        print "$config->{name}: Delete snapshot $delete\n";
+        &info($config->{name}, "Delete snapshot %s", $delete);
         $deletions++;
         if (!$test)
         {
-            if (!Snapshot::delete($config, $delete))
+            if (!&logelapsed($config->{name}, "Deleting snapshot", sub {Snapshot::delete($config, $delete)}))
             {
-                warn "$config->{name}: Error deleting snapshot $delete\n";
+                &warning($config->{name}, "Error deleting snapshot %s", $delete);
             }
         }
     }
@@ -141,10 +143,10 @@ foreach my $config (@configs)
 unlink($lockfile);
 close(LOCK);
 
-printf "--- Completed %d creation%s and %d deletion%s in %ds ---\n", 
+&info($me, "Completed %d creation%s and %d deletion%s in %ds ---", 
     $creations, $creations == 1 ? "" : "s",
     $deletions, $deletions == 1 ? "" : "s",
-    time-$now;
+    time-$now);
 
 sub readconfig
 {
@@ -160,7 +162,7 @@ sub readconfig
     };
 
     $file = Cwd::abs_path($file);
-    open($conffd, "<$file") || die "Can't read $file: $!\n";
+    open($conffd, "<$file") || &error($me, "Can't read %s: %s", $file, $!);
 
     if ($file =~ m#^(.*)/([^/]*)$#)
     {
@@ -169,7 +171,7 @@ sub readconfig
     }
     else
     {
-        die "Failed to parse '$file' for directory\n";
+        &error($me, "Failed to parse '%s' for directory", $file);
     }
 
     # Get a non-blocking lock. If we fail then exit as this
@@ -178,7 +180,7 @@ sub readconfig
     # config in the list.
     if (!flock($conffd, Fcntl::LOCK_EX|Fcntl::LOCK_NB))
     {
-        print "$config: in use\n";
+        &info($file, "Config is in use");
         close($conffd);
         next;
     }
@@ -192,40 +194,40 @@ sub readconfig
 
         # Parse out "tag = values" lines.
         my ($var, $values) = ($1, $2) if (/^(.*?)\s*=\s*(.*)\s*$/);
-        die "$file: Unparseable at line $..\n" unless defined($var);
+        &error($file, "Unparseable at line %d.", $.) unless defined($var);
 
         # Check our tags and do the necessary.
         if ($var eq "source")
         {
-            die "$file: source specified twice at line $..\n" 
+            &error($file, "source specified twice at line %d.", $.)
                 if (defined($config->{source}));
             $config->{source} = $values;
         }
         elsif ($var eq "dest")
         {
-            die "Dest specified twice at line $..\n" if (defined($config->{dest}));
+            &error($file, "Dest specified twice at line %d.", $.) if (defined($config->{dest}));
             $config->{dest} = $values;
         }
         elsif ($var eq "test")
         {
-            die "test specified twice at line $..\n" if (defined($config->{test}));
+            &error($file, "test specified twice at line %d.", $.) if (defined($config->{test}));
             $config->{test} = $values;
         }
         elsif ($var eq "pre-snapshot")
         {
-            die "pre-snapshot specified twice at line $..\n" 
+            &error($file, "pre-snapshot specified twice at line %d.", $.) 
                 if (defined($config->{pre_snapshot}));
             $config->{pre_snapshot} = $values;
         }
         elsif ($var eq "post-snapshot")
         {
-            die "post-snapshot specified twice at line $..\n" 
+            &error($file, "post-snapshot specified twice at line %d.", $.)
                 if (defined($config->{post_snapshot}));
             $config->{post_snapshot} = $values;
         }
         elsif ($var eq "pruneonly")
         {
-            die "$file: pruneonly must be either 'true' or 'false' at line $..\n"
+            &error($file, "pruneonly must be either 'true' or 'false' at line %d.", $.)
                 unless ($values =~ /^(true|false)$/);
             $config->{pruneonly} = 1 if ($values eq "true");
         }
@@ -233,17 +235,17 @@ sub readconfig
         {
             my ($every, $maxage, $bias, $noreplicate) = (undef, undef, 0, 0);
             my $origvalues = $values;
-            $every = &decodetime($1) if ($values =~ s/^\s*every\s+(\S+)//);
-            $maxage = &decodetime($1) if ($values =~ s/^\s*for\s+(\S+)//);
-            $bias = &decodetime($1) if ($values =~ s/^\s*bias\s+(\S+)//);
+            $every = &decodetime($file, $1) if ($values =~ s/^\s*every\s+(\S+)//);
+            $maxage = &decodetime($file, $1) if ($values =~ s/^\s*for\s+(\S+)//);
+            $bias = &decodetime($file, $1) if ($values =~ s/^\s*bias\s+(\S+)//);
 
-            die "$file: snapshot rule incorrectly specified at line $. (unparsed = '$values').\n"
+            &error($file, "snapshot rule incorrectly specified at line %d. (unparsed = '%s').", $., $values)
                 unless (defined($every) && defined($maxage) && ($values eq ""));
 
-            die "$file: snapshot rule at $. specifies \"every\" greater than \"for\"\n"
+            &error($file, "snapshot rule at line %d specifies \"every\" greater than \"for\"", $.)
                 if ($every > $maxage);
 
-            die "$file: snapshot rule at $. specifies \"bias\" greater than \"every\"\n"
+            &error($file, "snapshot rule at %d specifies \"bias\" greater than \"every\"", $.)
                 if ($bias > $every);
 
             push(@{$config->{snapshot}}, {
@@ -255,20 +257,20 @@ sub readconfig
         }
         elsif ($var eq "okmissing")
         {
-            die "$file: okmissing must be true or false\n"
+            &error($file, "okmissing must be true or false")
                 unless ($values =~ /^(true|false)$/);
             $config->{okmissing} = ($values eq "true");
         }
         else
         {
-            die "$file: Unknown setting at line $.: $_\n";
+            &error($file, "Unknown setting at line %d: %s", $., $_);
         }
     }
 
-    die "$file: Contains no source directory\n"
+    &error($file, "Contains no source directory")
         unless (defined($config->{source}));
 
-    die "$file: Contains no snapshot rules\n"
+    &error($file, "Contains no snapshot rules")
         if (@{$config->{snapshot}} == 0);
 
     # Sort them into increasing resolution order.
@@ -280,7 +282,7 @@ sub readconfig
 # Decode a "friendly" time into seconds.
 sub decodetime
 {
-    my ($period, $line) = @_;
+    my ($file, $period, $line) = @_;
     my %multiply = (
         sec => 1,
         min => 60,
@@ -290,7 +292,7 @@ sub decodetime
         year => 31536000
     );
 
-    die "Invalid period '$period' specified in line $.\n" 
+    &error($me, "Invalid period '%s' specified in line %d", $period, $.)
         unless ($period =~ /^(\d+)(sec|min|hour|day|week|year)s?$/);
     return $1*$multiply{$2};
 }
@@ -340,19 +342,68 @@ sub filtersnaplist
 
 sub runcommand
 {
-    my ($cmd) = @_;
+    my ($tag, $cmd) = @_;
     if ($test)
     {
-        print "Would run '$cmd'\n";
+        &info($tag, "Would run '%s'", $cmd);
         return 0;
     }
     else
     {
+	&info($tag, "Running '%s'", $cmd);
         system "/bin/bash", "-c", $cmd;
         return $? ? 1 : 0;
     }
 }
 
+# Format a log message.
+sub logmsg
+{
+	my ($tag, $format, @args) = @_;
+	my $t = localtime;
+	my $output = sprintf("%04d-%02d-%02d %02d:%02d:%02d %s: $format\n",
+		$t[5]+1900, $t[4]+1, $t[3], $t[2], $t[1], $t[0], $tag,
+		@args);
+	return $output;
+}
+
+# Run a coderef and log its elapsed time and return
+# value. Assumes return value is an integer.
+sub logelapsed
+{
+	my ($tag, $description, $code) = @_;
+	my $start = time;
+	my $ret = &{$code};
+	my $elapsed = time - $start;
+	&info($tag, "%s completed in %d second%s, returned %d", 
+		$description, $elapsed, ($elapsed == 1) ? "" : "s", $ret);
+	return $ret;
+}
+
+# Info message - goes to stdout.
+sub info
+{
+	print &logmsg(@_);
+}
+
+# Warning message - goes to stderr and, if not a
+# terminal, stdout.
+sub warning
+{
+	my $message = &logmsg(@_);
+	print $message unless (-t STDOUT);
+	print STDERR $message;
+}
+
+# Error message print message to stderr and, if
+# not a terminal, stdout. Then exit.
+sub error
+{
+	my $message = &logmsg(@_);
+	print $message unless (-t STDOUT);
+	print STDERR $message;
+	exit 1;
+}
 
 __END__
 
