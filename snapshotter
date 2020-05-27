@@ -8,6 +8,20 @@ use Symbol;
 use Fcntl;
 use Cwd;
 
+# How old should the lockfile be before we start reporting "another copy is running"
+# as an error?
+#
+# I'm not 100% happy with having a hardwired threshold here. Maybe each snapshot 
+# config file could have an estimate of how long its worst time "normal" run should
+# be and then $maxlockage could be set to the sum of these (for configs that would
+# result in a backup or deletion happening).
+# 
+# But we'd want a default value, rather than making it mandatory in every
+# config, and even deciding that default could be difficult.
+# 
+# So, for now:
+my $maxlockage = 3600;
+
 # Unbuffer stdout for logging.
 $| = 1;
 
@@ -81,7 +95,19 @@ foreach my $configfile (@ARGV)
 
 # Take a non-blocking lock. If we don't get it then exit.
 sysopen(LOCK, $lockfile, Fcntl::O_RDWR|Fcntl::O_CREAT) || &error($me, "Can't open lock file %s: %s", $lockfile, $!);
-flock(LOCK, Fcntl::LOCK_EX|Fcntl::LOCK_NB) || &error($me, "Another copy is running");
+unless (flock(LOCK, Fcntl::LOCK_EX|Fcntl::LOCK_NB))
+{
+    my $age = $now - (stat(LOCK))[9];
+    if ($age > $maxlockage)
+    {
+	&error($me, "Another copy has been running for %d second%s", $age, $age == 1 ? "" : "s");
+    }
+    else
+    {
+	&info($me, "Another copy has been running for %d second%s", $age, $age == 1 ? "" : "s");
+	exit(0);
+    }
+}
 
 # Handle each config file.
 foreach my $config (@configs)
@@ -104,7 +130,7 @@ foreach my $config (@configs)
         }
         if ($doit)
         {
-            &info($config->{name}, "Take snapshot %s", $newsnap);
+            &info($config->{name}, "Make backup %s", $newsnap);
             &logelapsed($config->{name}, "Command", sub {&runcommand($config->{name}, $config->{pre_snapshot})}) 
                 if (defined($config->{pre_snapshot}));
 
@@ -175,17 +201,6 @@ sub readconfig
     else
     {
         &error($me, "Failed to parse '%s' for directory", $file);
-    }
-
-    # Get a non-blocking lock. If we fail then exit as this
-    # almost certainly means another run of the same script
-    # is going and we'll end up with duplicates for any other
-    # config in the list.
-    if (!flock($conffd, Fcntl::LOCK_EX|Fcntl::LOCK_NB))
-    {
-        &info($file, "Config is in use");
-        close($conffd);
-        next;
     }
 
     while (<$conffd>)
