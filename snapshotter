@@ -8,6 +8,9 @@ use Symbol;
 use Fcntl;
 use Cwd;
 
+# Unbuffer stdout for logging.
+$| = 1;
+
 # Find the per-filesystem snapshotter module based
 # on the script name.
 use FindBin;
@@ -360,9 +363,10 @@ sub runcommand
 sub logmsg
 {
 	my ($tag, $format, @args) = @_;
-	my $t = localtime;
-	my $output = sprintf("%04d-%02d-%02d %02d:%02d:%02d %s: $format\n",
-		$t[5]+1900, $t[4]+1, $t[3], $t[2], $t[1], $t[0], $tag,
+	my @t = localtime;
+	my $output = sprintf("%04d-%02d-%02d %02d:%02d:%02d %s[%d]: $format\n",
+		$t[5]+1900, $t[4]+1, $t[3], $t[2], $t[1], $t[0], 
+		$tag, $$,
 		@args);
 	return $output;
 }
