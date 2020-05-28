@@ -47,7 +47,7 @@ sub delete
 {
     my ($config, $name) = @_;
 
-    system "zfs", "destroy", "-r", $name;
+    system "zfs", "destroy", $config->{source}.'@'.$name;
     return !$?;
 }
 
