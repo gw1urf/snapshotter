@@ -445,6 +445,13 @@ location. Multiple configuration files can be specified on the command line.
 If the B<-test> option is supplied then the script will describe what actions it
 would take, but won't actually do take them.
 
+The script knows how to handle several "snapshotting" technologies. These are managed 
+by their own perl modules in the "Snapshot" directory. The script decides which one 
+you're using by looking at its own name. So, for example, to do btrfs snapshotting, 
+you would name this script "btrfs-snapshotter" (or, better, symlink to it). I know 
+this isn't a brilliant approach, but the script was originally written for btrfs, 
+then modified for ZFS and others, and it seemed a good approach at the time!
+
 =head1 CONFIGURATION
 
 The configuration file contains a set of B<tag = value> specifications. Blank lines
