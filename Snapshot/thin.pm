@@ -1,4 +1,4 @@
-# Variant for btrfs
+# Variant for LVM thin snapshots
 
 package Snapshot;
 
