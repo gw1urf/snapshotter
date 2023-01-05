@@ -52,8 +52,12 @@ sub snapshot
 
     # By default, snapshots are skipped for auto-activation. I think we want them
     # to be activated for ease of use.
-    &system_no_stderr("lvchange", "-k", "n", $config->{vg}."/".$name);
-    return 0 if ($?);
+    #
+    # Actually, no - Thunar lists these as volumes and, when you've got 20-30 for each
+    # filesystem it gets really confusing.
+    #
+    # &system_no_stderr("lvchange", "-k", "n", $config->{vg}."/".$name);
+    # return 0 if ($?);
 
     # Now activate and trim it.
     &system_no_stderr("lvchange", "-ay", $config->{vg}."/".$name);
