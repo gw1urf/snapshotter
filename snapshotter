@@ -40,6 +40,7 @@ require "$FindBin::RealBin/Snapshot/$variant.pm";
 # Clear out the environment.
 %ENV = ();
 $ENV{'PATH'} = "/bin:/sbin:/usr/bin:/usr/sbin";
+$ENV{'SNAPSHOTTER_backend'} = $variant;
 
 my $test = 0;
 GetOptions("test" => \$test);
@@ -120,6 +121,18 @@ foreach my $config (@configs)
     {
         my $doit = 1;
 
+	# Put some stuff in the environment for pre- and post-script
+	my %oldenv = %ENV;
+
+	while (my ($var, $value) = each(%{$config}))
+	{
+		if (!ref($value))
+		{
+			$ENV{"SNAPSHOTTER_config_$var"} = $value;
+		}
+	}
+	$ENV{'SNAPSHOTTER_snapshot'} = $newsnap;
+
         # If there's a "test" option in the config file, run
         # the specified command and only take the snapshot if
         # that succeeds.
@@ -131,13 +144,19 @@ foreach my $config (@configs)
         if ($doit)
         {
             &info($config->{name}, "Make backup %s", $newsnap);
-            &logelapsed($config->{name}, "Command", sub {&runcommand($config->{name}, $config->{pre_snapshot})}) 
-                if (defined($config->{pre_snapshot}));
+            $ENV{'SNAPSHOTTER_pre_status'} = &logelapsed($config->{name}, "Command", sub {&runcommand($config->{name}, $config->{pre_snapshot})}) >> 8
+		if (defined($config->{pre_snapshot}));
 
             $creations++;
             if (!$test)
             {
-                if (&logelapsed($config->{name}, "Taking snapshot", sub {Snapshot::snapshot($config, $newsnap)}))
+		my $snapstatus = &logelapsed($config->{name}, "Taking snapshot", sub {Snapshot::snapshot($config, $newsnap)});
+
+		# Snapshot::snapshot returns true for OK. Shellscripts tend to
+		# expect false, so flip it here.
+	        $ENV{'SNAPSHOTTER_snap_status'} = !$snapstatus;
+
+		if ($snapstatus)
                 {
                     # Successful snapshot - add it to our list.
                     push(@{$config->{snaps}}, [ $newsnap, $now ]);
@@ -149,6 +168,9 @@ foreach my $config (@configs)
             }
             &logelapsed($config->{name}, "Command", sub{&runcommand($config->{name}, $config->{post_snapshot})})
                 if (defined($config->{post_snapshot}));
+
+	    # Restore original environment.
+	    %ENV = %oldenv;
         }
     }
 
@@ -370,7 +392,7 @@ sub runcommand
     {
 	&info($tag, "Running '%s'", $cmd);
         system "/bin/bash", "-c", $cmd;
-        return $? ? 1 : 0;
+        return $?;
     }
 }
 
